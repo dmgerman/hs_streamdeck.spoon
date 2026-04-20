@@ -84,6 +84,7 @@ local decks = {}         -- serial -> Deck instance
 local menus = {}         -- key -> {name, buttons} (key is serial or "large"/"small")
 local defaultMenu = nil  -- fallback menu if no specific one matches
 local lockWatcher = nil
+local lockWatcherRunning = false
 local autoOffTimer = nil
 local logger = hs.logger.new("streamdeck", "info")
 
@@ -145,7 +146,7 @@ local function onDiscovery(connected, device)
       deck:toggle(true)
       deck:updateAllButtons()
 
-      if lockWatcher and not lockWatcher:isRunning() then lockWatcher:start() end
+      if lockWatcher and not lockWatcherRunning then lockWatcher:start(); lockWatcherRunning = true end
       if autoOffTimer and not autoOffTimer:running() then autoOffTimer:start() end
     else
       logger.i("Deck disconnected: " .. serial)
@@ -155,8 +156,7 @@ local function onDiscovery(connected, device)
         decks[serial] = nil
       end
       if not next(decks) then
-        if lockWatcher then lockWatcher:stop() end
-        if autoOffTimer then autoOffTimer:stop() end
+        if lockWatcher then lockWatcher:stop(); lockWatcherRunning = false end        if autoOffTimer then autoOffTimer:stop() end
       end
     end
   end)
@@ -218,7 +218,7 @@ end
 function M:stop()
   forAllDecks(function(d) d:cleanup() end)
   decks = {}
-  if lockWatcher then lockWatcher:stop(); lockWatcher = nil end
+  if lockWatcher then lockWatcher:stop(); lockWatcher = nil; lockWatcherRunning = false end
   if autoOffTimer then autoOffTimer:stop(); autoOffTimer = nil end
   M.Renderer.cleanup()
   logger.i("Stopped")

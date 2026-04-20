@@ -1,10 +1,10 @@
 --- Icon loading and generation for Stream Deck buttons.
--- Wraps hs.image with caching via the external image_cache module.
+-- Wraps hs.image with caching via the bundled image_cache module.
 -- @module Icon
 
 local M = {}
 
-local image_cache = require("streamdeck.image_cache")
+local image_cache = dofile(hs.spoons.resourcePath("image_cache.lua"))
 local Renderer -- lazy-loaded to avoid circular requires
 
 local function renderer()

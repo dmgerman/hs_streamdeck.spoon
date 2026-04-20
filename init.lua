@@ -197,7 +197,7 @@ function M:start()
   hs.streamdeck.init(onDiscovery)
 
   -- Enable image caching after startup
-  local image_cache = require("streamdeck.image_cache")
+  local image_cache = dofile(hs.spoons.resourcePath("image_cache.lua"))
   image_cache.enable()
   logger.i("Started")
 

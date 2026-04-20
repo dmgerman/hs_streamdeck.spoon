@@ -1,13 +1,13 @@
 --- Image rendering for Stream Deck buttons.
 -- Creates images from text or canvas elements using a shared canvas.
--- Delegates caching to the external image_cache module.
+-- Delegates caching to the bundled image_cache module.
 -- @module Renderer
 
 local M = {}
 
 local Config = dofile(hs.spoons.resourcePath("Config.lua"))
 
-local image_cache = require("streamdeck.image_cache")
+local image_cache = dofile(hs.spoons.resourcePath("image_cache.lua"))
 
 local sharedCanvas = hs.canvas.new({ w = Config.BUTTON_SIZE, h = Config.BUTTON_SIZE })
 

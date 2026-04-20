@@ -1,0 +1,232 @@
+* hs_streamdeck.spoon
+
+Stream Deck management spoon for Hammerspoon. Provides stack-based menu navigation, scrolling, dynamic button updates, and multi-deck support.
+
+** Installation
+
+Copy =hs_streamdeck.spoon= into =~/.hammerspoon/Spoons/=.
+
+The spoon requires the =streamdeck.image_cache= module to be available on the Lua path (e.g., at =~/.hammerspoon/streamdeck/image_cache.lua=).
+
+** Quick Start
+
+#+BEGIN_SRC lua
+local sd = hs.loadSpoon("hs_streamdeck")
+
+sd:setMenu("large", {
+  {label = "Chrome", app = "com.google.Chrome"},
+  {label = "Emacs", app = "org.gnu.Emacs"},
+  {label = "Clock", imageProvider = function()
+    return sd.Renderer.fromText(os.date("%H:%M"), {fontSize = 30, volatile = true})
+  end, updateInterval = 60},
+})
+
+sd:start()
+#+END_SRC
+
+For faster startup, load deferred:
+
+#+BEGIN_SRC lua
+myTimer = hs.timer.doAfter(0.1, function()
+  require "my_streamdeck_config"
+end)
+#+END_SRC
+
+Note: save the timer to a global variable to prevent garbage collection.
+
+** Button Definition
+
+Buttons are plain Lua tables. All fields are optional.
+
+| Field            | Type                      | Description                                          |
+|------------------+---------------------------+------------------------------------------------------|
+| =label=          | string                    | Text displayed on button (also fallback image)       |
+| =icon=           | string or =hs.image=      | Path to image file, or pre-loaded image              |
+| =app=            | string                    | Bundle ID: auto-generates icon, launches on click    |
+| =url=            | string                    | URL to open on click                                 |
+| =onClick=        | =function(ctx)=           | Click handler                                        |
+| =onLongPress=    | =function(pressed)=       | Hold handler (called with =true= on hold, =false= on release) |
+| =children=       | table or =function(ctx)=  | Submenu: static table or factory function            |
+| =imageProvider=  | =function(ctx) → hs.image= | Dynamic image generator                            |
+| =stateProvider=  | =function() → any=        | Returns state for dirty-checking dynamic buttons     |
+| =updateInterval= | number                    | Seconds between automatic refreshes                  |
+| =volatile=       | boolean                   | Use volatile cache pool (for time-based images)      |
+
+*** Context Object
+
+The =ctx= passed to =onClick=, =children=, and =imageProvider= contains:
+
+#+BEGIN_SRC lua
+{
+  location = {x = column, y = row},  -- 0-based grid position
+  size = {w = columns, h = rows},    -- deck dimensions
+  isPressed = boolean,               -- true during press visual feedback
+  state = table,                     -- from stateProvider (imageProvider only)
+  deck = Deck,                       -- the Deck instance
+}
+#+END_SRC
+
+** Button Types
+
+*** App Launcher
+
+#+BEGIN_SRC lua
+{label = "Chrome", app = "com.google.Chrome"}
+#+END_SRC
+
+Icon auto-generated from bundle ID. Override with =onClick= if you want custom launch behavior.
+
+*** Static Action
+
+#+BEGIN_SRC lua
+{label = "Maximize", icon = "icons/max.png", onClick = function()
+  spoon.WinWin:moveAndResize("maximize")
+end}
+#+END_SRC
+
+When =icon= path is not found, falls back to rendering =label= as text.
+
+*** Dynamic Button
+
+#+BEGIN_SRC lua
+{
+  label = "CPU",
+  stateProvider = function() return math.floor(hs.execute("cpu_usage.sh", true)) end,
+  imageProvider = function(ctx)
+    return sd.Renderer.fromText(ctx.state .. "%", {fontSize = 40})
+  end,
+  updateInterval = 10,
+}
+#+END_SRC
+
+The image is only regenerated when =stateProvider= returns a different value.
+
+*** Submenu
+
+#+BEGIN_SRC lua
+-- Static children
+{label = "Apps", icon = "icons/apps.png", children = {
+  {label = "Music", app = "com.apple.Music"},
+  {label = "Safari", app = "com.apple.Safari"},
+}}
+
+-- Dynamic children (computed when opened)
+{label = "Windows", children = function(ctx)
+  local out = {}
+  for _, w in pairs(hs.window.allWindows()) do
+    out[#out + 1] = {label = w:title(), onClick = function() w:focus() end}
+  end
+  return out
+end}
+#+END_SRC
+
+A back button is automatically inserted at position 1 in submenus.
+
+** API Reference
+
+*** Spoon Lifecycle
+
+| Method                     | Description                                       |
+|----------------------------+---------------------------------------------------|
+| =sd:init()=                | Initialize (called automatically by =loadSpoon=)  |
+| =sd:start()=               | Begin listening for Stream Deck connections        |
+| =sd:stop()=                | Disconnect all decks, clean up resources           |
+| =sd.cleanup()=             | Static cleanup before Hammerspoon reload           |
+
+*** Menu Registration
+
+| Method                           | Description                                          |
+|----------------------------------+------------------------------------------------------|
+| =sd:setMenu(key, buttons, name)= | Register menu for a deck                            |
+| =sd:setDefaultMenu(buttons, name)= | Fallback menu for unregistered decks              |
+
+The =key= parameter can be:
+- A serial number (e.g., ="A00NA33332Q8DH"=) for a specific deck
+- ="large"= for decks with 15+ buttons
+- ="small"= for decks with fewer than 15 buttons
+
+*** Deck Access
+
+| Method              | Description                         |
+|---------------------+-------------------------------------|
+| =sd:getDeck(serial)= | Get a connected Deck by serial     |
+| =sd:getDecks()=      | Get all connected decks (table)    |
+
+*** Deck Instance Methods
+
+| Method                    | Description                              |
+|---------------------------+------------------------------------------|
+| =deck:push(buttons, name)= | Push a submenu onto the navigation stack |
+| =deck:pop()=               | Return to the previous menu              |
+| =deck:scrollBy(amount)=    | Scroll by N rows (positive=down)         |
+| =deck:scrollToTop()=       | Reset scroll to top                      |
+| =deck:toggle(forceOn)=     | Toggle deck on/off                       |
+| =deck:sleep()=              | Stop timers, keep connected              |
+| =deck:wake()=               | Resume from sleep                        |
+| =deck:updateAllButtons()=  | Force re-render all buttons              |
+| =deck:cleanup()=            | Release all resources                    |
+
+*** Renderer
+
+| Method                               | Description                             |
+|--------------------------------------+-----------------------------------------|
+| =sd.Renderer.fromText(text, opts)=    | Create text image                       |
+| =sd.Renderer.fromCanvas(elements, v)= | Create image from canvas elements      |
+| =sd.Renderer.black()=                 | Solid black image (singleton)           |
+
+=fromText= options: =textColor=, =backgroundColor=, =font=, =fontSize=, =volatile=.
+
+*** Icon
+
+| Method                         | Description                          |
+|--------------------------------+--------------------------------------|
+| =sd.Icon.fromPath(path)=       | Load image from file (cached)        |
+| =sd.Icon.fromBundle(bundleID)= | Load app icon by bundle ID (cached)  |
+| =sd.Icon.fromText(label, opts)= | Generate text icon (via Renderer)   |
+| =sd.Icon.black()=               | Solid black icon (singleton)         |
+
+*** Config
+
+| Constant              | Default    | Description                          |
+|-----------------------+------------+--------------------------------------|
+| =HOLD_DELAY=          | 0.5        | Seconds before long-press triggers   |
+| =AUTO_OFF_TIMEOUT=    | 1800       | Seconds idle before auto-off         |
+| =BRIGHTNESS_DAY=      | 60         | Brightness during daytime (8-18)     |
+| =BRIGHTNESS_NIGHT=    | 25         | Brightness at night                  |
+| =BRIGHTNESS_WAKE=     | 30         | Brightness on wake                   |
+| =DAY_START_HOUR=      | 8          | Hour when daytime begins             |
+| =DAY_END_HOUR=        | 18         | Hour when nighttime begins           |
+| =BUTTON_SIZE=         | 96         | Button image size in pixels          |
+
+** Automatic Buttons
+
+The spoon automatically manages these buttons (not part of user-defined menus):
+
+- *Toggle* (position 1 in root, last position always): turns deck on/off
+- *Back* (position 1 in submenus): returns to previous menu
+- *Scroll Up/Down* (left column): appears when menu has more buttons than the deck can display
+- *Filler* (remaining slots): solid black
+
+** Multi-Deck Support
+
+Register different menus per deck:
+
+#+BEGIN_SRC lua
+sd:setMenu("SERIAL_NUMBER_1", largeMenu, "Large Deck")
+sd:setMenu("SERIAL_NUMBER_2", smallMenu, "Small Deck")
+-- Or by size:
+sd:setMenu("large", largeMenu)
+sd:setMenu("small", smallMenu)
+-- Fallback:
+sd:setDefaultMenu(fallbackMenu)
+#+END_SRC
+
+Lookup priority: serial number → size ("large"/"small") → default.
+
+** Image Caching
+
+All images are cached via the external =streamdeck.image_cache= module. Set =volatile = true= on buttons with time-dependent content (clocks, counters) to use a separate cache pool that evicts more aggressively.
+
+** License
+
+MIT

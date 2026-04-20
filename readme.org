@@ -4,9 +4,7 @@ Stream Deck management spoon for Hammerspoon. Provides stack-based menu navigati
 
 ** Installation
 
-Copy =hs_streamdeck.spoon= into =~/.hammerspoon/Spoons/=.
-
-The spoon requires the =streamdeck.image_cache= module to be available on the Lua path (e.g., at =~/.hammerspoon/streamdeck/image_cache.lua=).
+Copy =hs_streamdeck.spoon= into =~/.hammerspoon/Spoons/=. The spoon is fully self-contained with no external dependencies.
 
 ** Quick Start
 
@@ -225,7 +223,7 @@ Lookup priority: serial number → size ("large"/"small") → default.
 
 ** Image Caching
 
-All images are cached via the external =streamdeck.image_cache= module. Set =volatile = true= on buttons with time-dependent content (clocks, counters) to use a separate cache pool that evicts more aggressively.
+All images are cached via the bundled =image_cache= module (LRU, max 200 regular + 60 volatile entries). Set =volatile = true= on buttons with time-dependent content (clocks, volume indicators, counters) to use the volatile cache pool that evicts more aggressively. Static icons are preloaded eagerly when menus are created or pushed.
 
 ** License
 

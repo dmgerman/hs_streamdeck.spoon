@@ -145,8 +145,8 @@ local function onDiscovery(connected, device)
       deck:toggle(true)
       deck:updateAllButtons()
 
-      if lockWatcher then lockWatcher:start() end
-      if autoOffTimer then autoOffTimer:start() end
+      if lockWatcher and not lockWatcher:isRunning() then lockWatcher:start() end
+      if autoOffTimer and not autoOffTimer:running() then autoOffTimer:start() end
     else
       logger.i("Deck disconnected: " .. serial)
       local deck = decks[serial]
@@ -196,7 +196,9 @@ function M:start()
   -- Auto-off timer
   autoOffTimer = hs.timer.doEvery(M.Config.AUTO_OFF_TIMEOUT, function()
     forAllDecks(function(d)
-      d.device:setBrightness(0)
+      if d.device then
+        pcall(function() d.device:setBrightness(0) end)
+      end
       d.isOn = false
     end)
   end)

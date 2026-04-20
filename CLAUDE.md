@@ -5,17 +5,14 @@ Stream Deck management spoon for Hammerspoon. Provides stack-based menu navigati
 ## Architecture
 
 ```
-init.lua     → Spoon lifecycle, device discovery, menu registration API
-Deck.lua     → Per-deck state machine (nav stack, scroll, timers, press/hold, sleep/wake)
-Renderer.lua → Image generation (text→image, canvas→image, black filler singleton)
-Icon.lua     → Icon loading with cache (fromPath, fromBundle, fromText)
-Config.lua   → Named constants (brightness, timeouts, hold delay, button size)
-icons/       → Bundled navigation icons (back.png, toggle.png)
+init.lua        → Spoon lifecycle, device discovery, menu registration API
+Deck.lua        → Per-deck state machine (nav stack, scroll, timers, press/hold, sleep/wake)
+Renderer.lua    → Image generation (text→image, canvas→image, black filler singleton)
+Icon.lua        → Icon loading with cache (fromPath, fromBundle, fromText)
+Config.lua      → Named constants (brightness, timeouts, hold delay, button size)
+image_cache.lua → LRU image cache with volatile pool (prevents IOSurface leaks)
+icons/          → Bundled navigation icons (back.png, toggle.png)
 ```
-
-### External Dependency
-
-Image caching is handled by the separate `streamdeck.image_cache` module (not bundled in the spoon). The spoon `require()`s it — it must be on the Lua path.
 
 ### Data Flow
 
@@ -72,12 +69,17 @@ If a string path fails `Icon.fromPath()` (returns nil), it falls through to the 
 
 ## Development Notes
 
-- The spoon has zero external icon dependencies — back/toggle icons are bundled in `icons/`.
+- The spoon is fully self-contained — no external dependencies. `image_cache.lua` and navigation icons are bundled.
+- All modules share a single `image_cache` instance via `_require()` (exposed as `_hs_streamdeck_require`).
 - `Renderer.black()` returns a singleton — safe to call frequently.
 - `Renderer.fromCanvas()` and `Renderer.fromText()` delegate to `image_cache.get_or_create()` — cache keys are content-addressed.
-- `Deck:cleanup()` nils out `_lastImage`, `_resolvedImage`, `_lastState` on all buttons in all stack frames.
+- **Preloading**: Static icons are preloaded eagerly at `Deck.new()` (root menu) and `Deck:push()` (submenus) via `preloadButtons()`. Dynamic buttons (`imageProvider`) are skipped.
+- **Volatile images**: Dynamic buttons that produce unique content each update should pass `volatile = true` to `Renderer.fromCanvas/fromText`. This routes them through the volatile cache pool (max 60) with aggressive eviction, preventing IOSurface leaks.
+- **Image disposal**: `resolveButtonImage()` nils `_lastImage` before replacement to allow GC. `Deck:cleanup()` clears all hardware buttons to black and nils all cached images.
 - Timer references from `hs.timer.doAfter` must be saved to globals (not locals) to prevent GC before firing.
 - Load the spoon deferred (`hs.timer.doAfter(0.1, ...)`) to avoid blocking Hammerspoon startup. Save the timer to a global variable.
+- Lock watcher and auto-off timer are only started once (guarded by running-state check).
+- Auto-off timer guards against nil device with pcall.
 
 ## Config File Pattern
 

@@ -2,14 +2,17 @@
 -- Wraps hs.image with caching via the bundled image_cache module.
 -- @module Icon
 
+-- _require is injected by init.lua before loading this module
+local _require = _hs_streamdeck_require
+
 local M = {}
 
-local image_cache = dofile(hs.spoons.resourcePath("image_cache.lua"))
+local image_cache = _require("image_cache.lua")
 local Renderer -- lazy-loaded to avoid circular requires
 
 local function renderer()
   if not Renderer then
-    Renderer = dofile(hs.spoons.resourcePath("Renderer.lua"))
+    Renderer = _require("Renderer.lua")
   end
   return Renderer
 end

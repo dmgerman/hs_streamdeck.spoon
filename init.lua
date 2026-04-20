@@ -42,6 +42,9 @@ local function _require(name)
   return _hs_streamdeck_modules[name]
 end
 
+-- Expose _require so submodules can use it
+_hs_streamdeck_require = _require
+
 local M = {}
 
 M.name = "hs_streamdeck"
@@ -126,34 +129,39 @@ end
 --------------------------------------------------------------------------------
 
 local function onDiscovery(connected, device)
-  local serial = device:serialNumber()
+  local ok, err = pcall(function()
+    local serial = device:serialNumber()
 
-  if connected then
-    logger.i("Deck connected: " .. serial)
-    local menu = menuForDeck(device)
-    local deck = M.Deck.new(device, menu.buttons, menu.name)
-    decks[serial] = deck
+    if connected then
+      logger.i("Deck connected: " .. serial)
+      local menu = menuForDeck(device)
+      local deck = M.Deck.new(device, menu.buttons, menu.name)
+      decks[serial] = deck
 
-    device:buttonCallback(function(_, buttonID, pressed)
-      deck:handleButton(buttonID, pressed)
-    end)
-    device:reset()
-    deck:toggle(true)
-    deck:updateAllButtons()
+      device:buttonCallback(function(_, buttonID, pressed)
+        deck:handleButton(buttonID, pressed)
+      end)
+      device:reset()
+      deck:toggle(true)
+      deck:updateAllButtons()
 
-    if lockWatcher then lockWatcher:start() end
-    if autoOffTimer then autoOffTimer:start() end
-  else
-    logger.i("Deck disconnected: " .. serial)
-    local deck = decks[serial]
-    if deck then
-      deck:cleanup()
-      decks[serial] = nil
+      if lockWatcher then lockWatcher:start() end
+      if autoOffTimer then autoOffTimer:start() end
+    else
+      logger.i("Deck disconnected: " .. serial)
+      local deck = decks[serial]
+      if deck then
+        deck:cleanup()
+        decks[serial] = nil
+      end
+      if not next(decks) then
+        if lockWatcher then lockWatcher:stop() end
+        if autoOffTimer then autoOffTimer:stop() end
+      end
     end
-    if not next(decks) then
-      if lockWatcher then lockWatcher:stop() end
-      if autoOffTimer then autoOffTimer:stop() end
-    end
+  end)
+  if not ok then
+    logger.e("Discovery error: " .. tostring(err))
   end
 end
 
@@ -197,7 +205,7 @@ function M:start()
   hs.streamdeck.init(onDiscovery)
 
   -- Enable image caching after startup
-  local image_cache = dofile(hs.spoons.resourcePath("image_cache.lua"))
+  local image_cache = _require("image_cache.lua")
   image_cache.enable()
   logger.i("Started")
 

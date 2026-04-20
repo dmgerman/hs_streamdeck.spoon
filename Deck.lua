@@ -5,9 +5,12 @@
 local M = {}
 M.__index = M
 
-local Config = dofile(hs.spoons.resourcePath("Config.lua"))
-local Renderer = dofile(hs.spoons.resourcePath("Renderer.lua"))
-local Icon = dofile(hs.spoons.resourcePath("Icon.lua"))
+-- _require is injected by init.lua before loading this module
+local _require = _hs_streamdeck_require
+
+local Config = _require("Config.lua")
+local Renderer = _require("Renderer.lua")
+local Icon = _require("Icon.lua")
 
 --- Deep-compare two tables for equality.
 local function equals(o1, o2)
@@ -32,6 +35,47 @@ end
 --- Stop a timer if non-nil.
 local function stopTimer(timer)
   if timer then timer:stop() end
+end
+
+--- Preload static icons for a button (icon, image, app fields).
+-- Skips buttons with imageProvider (dynamic).
+local function preloadButtonImage(button)
+  if not button or button.imageProvider then return end
+  if button._resolvedImage then return end
+
+  if button.image then
+    if type(button.image) == "string" then
+      button._resolvedImage = Icon.fromPath(button.image)
+    else
+      button._resolvedImage = button.image
+    end
+    if button._resolvedImage then return end
+  end
+
+  if button.icon then
+    if type(button.icon) == "string" then
+      button._resolvedImage = Icon.fromPath(button.icon)
+    else
+      button._resolvedImage = button.icon
+    end
+    if button._resolvedImage then return end
+  end
+
+  if button.app then
+    button._resolvedImage = Icon.fromBundle(button.app)
+    if button._resolvedImage then return end
+  end
+
+  if button.label then
+    button._resolvedImage = Renderer.fromText(button.label, { fontSize = 30 })
+  end
+end
+
+--- Preload all static icons for a list of buttons.
+local function preloadButtons(buttons)
+  for _, button in ipairs(buttons) do
+    preloadButtonImage(button)
+  end
 end
 
 --------------------------------------------------------------------------------
@@ -62,6 +106,9 @@ function M.new(device, menuDef, menuName)
   self._visibleCache = nil
   self._visibleCacheValid = false
 
+  -- Preload static icons for root menu buttons
+  preloadButtons(self.state.buttons)
+
   return self
 end
 
@@ -85,20 +132,22 @@ end
 
 --- Build a scroll-up button.
 local function scrollUpButton(deck)
+  local pageRows = math.floor((deck.totalButtons - 4) / (deck.columns - 1))
   return {
     label = "Up",
     _resolvedImage = Renderer.fromText("Up"),
-    onClick = function() deck:scrollBy(-1) end,
+    onClick = function() deck:scrollBy(-pageRows) end,
     onLongPress = function() deck:scrollToTop() end,
   }
 end
 
 --- Build a scroll-down button.
 local function scrollDownButton(deck)
+  local pageRows = math.floor((deck.totalButtons - 4) / (deck.columns - 1))
   return {
     label = "Down",
     _resolvedImage = Renderer.fromText("Down"),
-    onClick = function() deck:scrollBy(1) end,
+    onClick = function() deck:scrollBy(pageRows) end,
   }
 end
 
@@ -122,6 +171,10 @@ end
 
 --- Compute the currently visible buttons for this deck.
 -- Applies scrolling, inserts back/scroll/toggle/filler buttons.
+-- Layout:
+--   Position 1: toggle (root) or back (submenu)
+--   Last position: toggle
+--   When scrolling: scroll-up at row 2 col 1, scroll-down at last row col 1
 -- @return table Array of button definitions, exactly totalButtons in length
 function M:visibleButtons()
   if self._visibleCacheValid then return self._visibleCache end
@@ -130,53 +183,55 @@ function M:visibleButtons()
   local nProvided = #provided
   local offset = self.state.scrollOffset or 0
   local cols = self.columns
+  local rows = self.rows
   local total = self.totalButtons
 
-  -- Start with a copy of provided buttons
+  -- Reserved slots: position 1 (toggle/back) and last position (toggle)
+  -- If scrolling: also scroll-up (row 2, col 1) and scroll-down (last row, col 1)
+  local slotsWithoutScroll = total - 2
+  local slotsWithScroll = total - 4
+  local needsScroll = nProvided > slotsWithoutScroll
+
+  local perScrollStep = cols - 1
+  local skipCount = offset * perScrollStep
+
+  local userSlots = needsScroll and slotsWithScroll or slotsWithoutScroll
+  local userButtons = {}
+  for i = skipCount + 1, math.min(skipCount + userSlots, nProvided) do
+    userButtons[#userButtons + 1] = provided[i]
+  end
+
   local buttons = {}
-  for _, b in ipairs(provided) do buttons[#buttons + 1] = b end
+  local idx = 1  -- index into userButtons
 
-  -- Apply scroll offset (drop offset * (cols-1) buttons from start)
-  if offset > 0 then
-    for _ = 1, offset * (cols - 1) do
-      table.remove(buttons, 1)
+  for r = 1, rows do
+    for c = 1, cols do
+      local isFirst = (r == 1 and c == 1)
+      local isLast = (r == rows and c == cols)
+
+      if isFirst then
+        -- Position 1: toggle or back
+        if #self.stack > 0 then
+          buttons[#buttons + 1] = backButton(self)
+        else
+          buttons[#buttons + 1] = toggleButton(self)
+        end
+      elseif isLast then
+        -- Last position: toggle
+        buttons[#buttons + 1] = toggleButton(self)
+      elseif needsScroll and c == 1 and r == 2 then
+        -- Scroll up
+        buttons[#buttons + 1] = scrollUpButton(self)
+      elseif needsScroll and c == 1 and r == rows then
+        -- Scroll down (or filler if nothing below)
+        local moreBelow = (skipCount + userSlots) < nProvided
+        buttons[#buttons + 1] = moreBelow and scrollDownButton(self) or fillerButton()
+      else
+        -- User button or filler
+        buttons[#buttons + 1] = userButtons[idx] or fillerButton()
+        idx = idx + 1
+      end
     end
-  end
-
-  if #buttons == 0 then
-    self._visibleCache = {}
-    self._visibleCacheValid = true
-    return {}
-  end
-
-  -- Insert back button if in a submenu, or toggle at position 1 if root
-  if #self.stack > 0 then
-    table.insert(buttons, 1, backButton(self))
-  else
-    table.insert(buttons, 1, toggleButton(self))
-  end
-
-  -- Pad with black fillers
-  while #buttons < total do
-    buttons[#buttons + 1] = fillerButton()
-  end
-
-  -- Insert scroll buttons if needed
-  if nProvided > total then
-    table.insert(buttons, cols + 1, scrollUpButton(self))
-    if nProvided >= offset * cols + cols * (self.rows - 1) - 1 then
-      table.insert(buttons, cols * 2 + 1, scrollDownButton(self))
-    else
-      table.insert(buttons, cols * 2 + 1, fillerButton())
-    end
-  end
-
-  -- Insert toggle button near bottom-right
-  table.insert(buttons, cols * self.rows, toggleButton(self))
-
-  -- Trim to exact size
-  while #buttons > total do
-    table.remove(buttons)
   end
 
   self._visibleCache = buttons
@@ -257,6 +312,8 @@ local function resolveButtonImage(button, context)
       context.state = newState
     end
     if dirty or not button._lastImage then
+      -- Release previous image to allow GC
+      button._lastImage = nil
       button._lastImage = button.imageProvider(context)
     end
     return button._lastImage
@@ -354,6 +411,7 @@ function M:push(newMenu, name)
     scrollOffset = self.state.scrollOffset,
   }
   self.state = { name = name or "Submenu", buttons = newMenu, scrollOffset = 0 }
+  preloadButtons(self.state.buttons)
   self:invalidateCache()
   self:updateAllButtons()
 end
@@ -371,8 +429,11 @@ end
 --- Scroll by a number of rows.
 -- @param amount number Rows to scroll (positive = down, negative = up)
 function M:scrollBy(amount)
+  local nProvided = #(self.state.buttons or {})
+  local perStep = self.columns - 1
+  local maxOffset = math.max(0, math.ceil(nProvided / perStep) - 1)
   local offset = (self.state.scrollOffset or 0) + amount
-  self.state.scrollOffset = math.max(0, offset)
+  self.state.scrollOffset = math.max(0, math.min(offset, maxOffset))
   self:invalidateCache()
   self:updateAllButtons()
 end
@@ -482,8 +543,19 @@ end
 --------------------------------------------------------------------------------
 
 --- Release all resources for this deck.
+-- Clears all hardware buttons to black before releasing the device.
 function M:cleanup()
   self:stopTimers()
+
+  -- Clear all hardware buttons to black
+  if self.device then
+    local black = Renderer.black()
+    for i = 1, self.totalButtons do
+      pcall(function() self.device:setButtonImage(i, black) end)
+    end
+    pcall(function() self.device:setBrightness(0) end)
+  end
+
   -- Release cached images from dynamic buttons
   local allStates = { self.state }
   for _, s in ipairs(self.stack) do allStates[#allStates + 1] = s end

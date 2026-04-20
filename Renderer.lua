@@ -3,11 +3,13 @@
 -- Delegates caching to the bundled image_cache module.
 -- @module Renderer
 
+-- _require is injected by init.lua before loading this module
+local _require = _hs_streamdeck_require
+
 local M = {}
 
-local Config = dofile(hs.spoons.resourcePath("Config.lua"))
-
-local image_cache = dofile(hs.spoons.resourcePath("image_cache.lua"))
+local Config = _require("Config.lua")
+local image_cache = _require("image_cache.lua")
 
 local sharedCanvas = hs.canvas.new({ w = Config.BUTTON_SIZE, h = Config.BUTTON_SIZE })
 
